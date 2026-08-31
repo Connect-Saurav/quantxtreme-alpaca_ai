@@ -1,0 +1,119 @@
+// Trading Committee + Risk Governor — Prisma schema
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Research ============
+
+model Analysis {
+  id            String   @id @default(cuid())
+  symbol        String
+  // Per-agent raw JSON output (technical, fundamental, sentiment, macro)
+  technical     String
+  fundamental   String
+  sentiment     String
+  macro         String
+  // Aggregated thesis
+  thesis        String
+  direction     String   // LONG | SHORT | NEUTRAL
+  confidence    Float
+  expectedReturn Float
+  stopLoss      Float
+  timeHorizon   String
+  createdAt     DateTime @default(now())
+
+  trades        Trade[]
+  counterfactuals Counterfactual[]
+}
+
+// ============ Executed trades ============
+
+model Trade {
+  id            String   @id @default(cuid())
+  analysisId    String?
+  analysis      Analysis? @relation(fields: [analysisId], references: [id])
+
+  symbol        String
+  direction     String   // LONG | SHORT
+  thesis        String
+  confidence    Float
+  expectedReturn Float
+  stopLoss      Float
+  timeHorizon   String
+  signalsUsed   String   // JSON array of signals
+  entryPrice    Float
+  quantity      Float
+  status        String   @default("OPEN") // OPEN | CLOSED
+  exitPrice     Float?
+  entryAt       DateTime @default(now())
+  exitAt        DateTime?
+  // Post-trade learning
+  outcome       Float?   // realized PnL %
+  thesisCorrect Boolean?
+  lesson        String?
+  closedReason  String?  // take_profit | stop_loss | time_exit | manual
+}
+
+// ============ Counterfactual memory (USP #1) ============
+
+model Counterfactual {
+  id            String   @id @default(cuid())
+  analysisId    String?
+  analysis      Analysis? @relation(fields: [analysisId], references: [id])
+
+  symbol        String
+  direction     String   // LONG | SHORT
+  thesis        String
+  confidence    Float
+  expectedReturn Float
+  rejectionRule String   // exposure_limit | confidence_threshold | drawdown_limit | position_size | min_return
+  rejectionReason String // human-readable
+  priceAtRejection Float
+  rejectedAt    DateTime @default(now())
+
+  // Filled in asynchronously after market moves (counterfactual outcome)
+  priceAfterMove  Float?
+  counterfactualOutcome Float? // % return if executed
+  counterfactualProfitable Boolean?
+  counterfactualExplanation String?
+  evaluatedAt   DateTime?
+}
+
+// ============ Portfolio state (live exposure tracking) ============
+
+model PortfolioState {
+  id            String   @id @default(cuid())
+  sector        String   @unique
+  exposure      Float    // percentage of portfolio, 0-100
+  updatedAt     DateTime @updatedAt
+}
+
+model RiskConfig {
+  id            String   @id @default("default")
+  maxPositionSize Float  @default(10.0)  // % of portfolio per position
+  maxSectorExposure Float @default(35.0)
+  maxTotalExposure Float  @default(80.0)
+  minConfidence  Float   @default(0.65)
+  maxDrawdown    Float   @default(15.0)
+  minExpectedReturn Float @default(0.02)
+  startingCapital Float  @default(100000)
+  updatedAt     DateTime @updatedAt
+}
+
+// ============ Asset universe (mock market data) ============
+
+model Asset {
+  id            String   @id @default(cuid())
+  ticker        String   @unique
+  name          String
+  sector        String
+  basePrice     Float
+  volatility    Float    @default(0.02)
+}
